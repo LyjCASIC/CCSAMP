@@ -1,0 +1,98 @@
+function [theta,S_jl,CS,L_jl]=CS_pirsonSAMP(y,A,S0,P_hf,P_stop)
+[y_rows,y_columns] = size(y);
+    if y_rows<y_columns
+        y = y';%y should be a column vector
+    end
+    [y_z,y_h]=size(y);
+    [M,N] = size(A);%传感矩阵A为M*N矩阵
+    theta = zeros(N,1);%用来存储恢复的theta(列向量)
+    Pos_theta = [];%用来迭代过程中存储A被选择的列序号
+    r_n = y;%初始化残差(residual)为y
+    XZ_SZ=[y_rows y_columns];
+L_xz=max(XZ_SZ);
+    L = S0;%初始化步长(Size of the finalist in the first stage)
+    Stage = 1;%初始化Stage
+%     IterMax = M;
+     IterMax = M;
+    cc=zeros(IterMax,1);
+    S_jl=zeros(IterMax,1);%记录步长变化
+    L_jl=zeros(IterMax,1);%记录选取数变化
+    Cs_jl=zeros(IterMax,1);%记录相关关系
+%     S=1;
+    for ii=1:IterMax%最多迭代M次
+        %(1)Preliminary Test
+        product = A'*r_n;%传感矩阵A各列与残差的内积
+        [val,pos]=sort(abs(product),'descend');%降序排列
+        Sk = pos(1:L);%选出最大的L个
+        %(2)Make Candidate List
+        Ck = union(Pos_theta,Sk);
+        %(3)Final Test
+        if length(Ck)<=M
+            At = A(:,Ck);%将A的这几列组成矩阵At
+        else
+            theta_ls=0;
+            break;
+        end
+        %y=At*theta，以下求theta的最小二乘解(Least Square)
+        theta_ls0 = (At'*At)^(-1)*At'*y;%最小二乘解
+        [val,pos]=sort(abs(theta_ls0),'descend');%降序排列
+        F = Ck(pos(1:L));
+        %(4)Compute Residue
+        %A(:,F)*theta_ls是y在A(:,F)列空间上的正交投影
+        theta_ls = (A(:,F)'*A(:,F))^(-1)*A(:,F)'*y;
+        r_new = y - A(:,F)*theta_ls;%更新残差r
+        %
+        r1=y-r_new;
+        r2=At*theta_ls0;
+        %
+        s_xg_1=r1; 
+        s_xg_2=r2;
+        E_jz1=sum(s_xg_1)/M;
+        Fs_1=s_xg_1-E_jz1*ones(M,1);
+        Fs_1=Fs_1.*Fs_1;
+        Fs_1_tj=sum(Fs_1);
+        Fc_1=sqrt(Fs_1_tj/M);
+        Cs1=(s_xg_1-E_jz1*ones(M,1))/ Fc_1;
+        E_jz2=sum(s_xg_2)/M;
+        Fs_2=s_xg_2-E_jz2*ones(M,1);
+        Fs_2=Fs_2.*Fs_2;
+        Fs_2_tj=sum(Fs_2);
+        Fc_2=sqrt(Fs_2_tj/M);
+        Cs2=(s_xg_2-E_jz2*ones(M,1))/ Fc_2;
+        CS=sum(Cs1.*Cs2)/M;
+        Cs_jl(ii,1)=CS;
+        Cs_jl(1,1)=0;
+S=S0;
+if ii>1
+if CS<0.9||CS==0.9
+S=S0+(ceil(10-10*CS));
+elseif CS<(1-P_stop)||CS==(1-P_stop)
+S=S0;
+elseif CS<=1
+S=1;    
+     S_jl(ii,1)=S;
+end
+end
+        if norm(r_new)<(P_hf/1)||Cs_jl(ii,1)==1
+            Pos_theta = F;
+            %r_n = r_new;%更新r_n以便输出最新的r_n
+            break;%quit the iteration
+        elseif norm(r_new)>=norm(r_n)%stage switching 
+            Stage = Stage + 1;%Update the stage index 
+            L = L+S;%Update the size of finalist
+              if L>=L_xz
+                 L=L_xz;
+               end
+            if ii == IterMax%最后一次循环
+                Pos_theta = F;%更新Pos_theta以与theta_ls匹配，防止报错
+            end
+        else
+            Pos_theta = F;%Update the finalist Fk
+            r_n = r_new;%Update the residue
+        end
+        L_jl(ii,1)=L;
+   cc(ii)=sum(abs(r_new));     
+    end 
+    theta(Pos_theta)=theta_ls;%恢复出的theta
+%     Bs_stage=Stage;
+end
